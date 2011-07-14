@@ -48,10 +48,16 @@
 
 - (void)disconnect {
 	[socket disconnectAfterReadingAndWriting];
+	
+	// Our owner may let go of us after disconnecting, so we want to survive until the socket is disconnected.
+	// GCDAsyncSocket will keep sending delegate messages until it's disconnected,
+	// and setting the delegate to nil doesn't work, since that's async, too.
+	[socket performBlock:^{[self self];}];
 }
 
 
 - (void)disconnectImmediately {
+	[self disconnect];
 	[socket disconnect];
 }
 

@@ -4,39 +4,33 @@
 int main (int argc, const char * argv[]) {
     NSAutoreleasePool * pool = [[NSAutoreleasePool alloc] init];
 
-	// Server
+	// Simple one-shot HTTP server
 	
-	TFSocketListener *server = [[TFSocketListener alloc] initWithPort:1234];
-	NSMutableSet *clients = [NSMutableSet set];
-	server.acceptHandler = ^(TFSocket *newSocket) {
-		[clients addObject:newSocket];
-		NSData *crlf = [NSData dataWithBytes:"\r\n" length:2];
-		
-		[newSocket readDataToData:crlf timeout:-1 callback:^(NSData *data) {
-			NSString *string = [[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] autorelease];
-			NSLog(@"Server got line: %@", string);
-			[newSocket disconnect];
+	TFSocketListener *HTTPServer = [[TFSocketListener alloc] initWithPort:8080];	
+	HTTPServer.acceptHandler = ^(TFSocket *client) {
+		NSData *crlfcrlf = [NSData dataWithBytes:"\r\n\r\n" length:4];
+		[client readDataToData:crlfcrlf timeout:-1 callback:^(NSData *headerData) {
+			CFHTTPMessageRef request = CFHTTPMessageCreateEmpty(NULL, YES);
+			CFHTTPMessageAppendBytes(request, [headerData bytes], [headerData length]);
+			NSString *path = [NSMakeCollectable(CFHTTPMessageCopyRequestURL(request)) autorelease];
+			CFRelease(request);
+			
+			NSString *bodyString = [NSString stringWithFormat:@"<h1>This is %@!</h1>", path];
+			NSData *bodyData = [bodyString dataUsingEncoding:NSUTF8StringEncoding];
+			
+			CFHTTPMessageRef response = CFHTTPMessageCreateResponse(NULL, 200, NULL, kCFHTTPVersion1_0);
+			CFHTTPMessageSetHeaderFieldValue(response, CFSTR("Content-Type"), CFSTR("text/html"));
+			CFHTTPMessageSetHeaderFieldValue(response, CFSTR("Content-Length"), (CFStringRef)[NSString stringWithFormat:@"%lu", (unsigned long)[bodyData length]]);
+			CFHTTPMessageSetBody(response, (CFDataRef)bodyData);
+			
+			NSData *responseData = [NSMakeCollectable(CFHTTPMessageCopySerializedMessage(response)) autorelease];
+			CFRelease(response);
+			[client writeData:responseData timeout:-1 callback:nil];
+			[client disconnect];
 		}];
-		newSocket.disconnectHandler = ^(NSError *e) {
-			[clients removeObject:newSocket];
-		};
 	};
 	
-	
-	// Client
-	
-	TFSocket *client = [[TFSocket alloc] initWithHost:@"localhost" port:1234];
-	client.connectHandler = ^{
-		NSString *string = @"Wello horld!\r\n";
-		NSLog(@"Client says: %@", string);
-		[client writeData:[string dataUsingEncoding:NSUTF8StringEncoding] timeout:-1 callback:nil];
-		[client disconnect];
-	};
-	client.disconnectHandler = ^(NSError *error) {
-		if(error) NSLog(@"Client failed: %@", error);
-	};
-	
-	
+	NSLog(@"Try it: http://localhost:8080/SPARTA");	
 	for(;;) [[NSRunLoop currentRunLoop] run];
     [pool drain];
     return 0;
