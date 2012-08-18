@@ -6,19 +6,10 @@
 //  Copyright 2011 Lighthead Software. All rights reserved.
 //
 
-#import "GCDAsyncSocket.h"
-
-
-@interface TFSocket : NSObject <GCDAsyncSocketDelegate> {
-	GCDAsyncSocket *socket;
-	
-	long tagCounter;
-	NSMutableDictionary *writeCallbacks;
-	NSMutableDictionary *readCallbacks;
-	
-	void(^connectHandler)();
-	void(^disconnectHandler)(NSError *error);
-}
+@interface TFSocket : NSObject
+@property(copy) void(^connectHandler)();
+@property(copy) void(^disconnectHandler)(NSError *error);
+@property(readonly) NSString *host;
 
 - (id)initWithHost:(NSString*)host port:(uint16_t)port;
 - (void)disconnect;
@@ -30,25 +21,14 @@
 
 - (void)readDataToLength:(NSUInteger)length timeout:(NSTimeInterval)timeout callback:(void(^)(NSData *data))didReadCallback;
 - (void)readDataToData:(NSData*)data timeout:(NSTimeInterval)timeout callback:(void(^)(NSData *data))didReadCallback;
-
-
-@property(copy) void(^connectHandler)();
-@property(copy) void(^disconnectHandler)(NSError *error);
-
-@property(readonly) NSString *host;
-
+- (void)readDataToData:(NSData*)data maxLength:(NSUInteger)maxLength timeout:(NSTimeInterval)timeout callback:(void(^)(NSData *data))didReadCallback;
 @end
 
 
 
-@interface TFSocketListener : NSObject <GCDAsyncSocketDelegate> {
-	GCDAsyncSocket *socket;
-	
-	void(^acceptHandler)(TFSocket *socket);
-}
+@interface TFSocketListener : NSObject
+@property(copy) void(^acceptHandler)(TFSocket *socket);
 
 - (id)initWithPort:(uint16_t)port;
 - (void)stop;
-
-@property(copy) void(^acceptHandler)(TFSocket *socket);
 @end

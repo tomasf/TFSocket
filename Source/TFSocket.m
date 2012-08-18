@@ -10,90 +10,96 @@
 #import "GCDAsyncSocket.h"
 
 
+@interface TFSocket () <GCDAsyncSocketDelegate>
+@property(strong) GCDAsyncSocket *socket;
+
+@property long tagCounter;
+@property(strong) NSMutableDictionary *writeCallbacks;
+@property(strong) NSMutableDictionary *readCallbacks;
+@end
+
+
+
 @implementation TFSocket
 
 
-- (id)initWithGCDAsyncSocket:(GCDAsyncSocket*)sock {
+- (id)initWithGCDAsyncSocket:(GCDAsyncSocket*)socket {
 	if(!(self = [super init])) return nil;
 	
-	socket = [sock retain];
-	[socket setDelegate:self];
-	readCallbacks = [[NSMutableDictionary alloc] init];
-	writeCallbacks = [[NSMutableDictionary alloc] init];
+	self.socket = socket;
+	socket.delegate = self;
+	
+	self.readCallbacks = [NSMutableDictionary dictionary];
+	self.writeCallbacks = [NSMutableDictionary dictionary];
 	
 	return self;
 }
 
 
 - (id)initWithHost:(NSString*)host port:(uint16_t)port {
-	GCDAsyncSocket *sock = [[GCDAsyncSocket alloc] initWithDelegate:self delegateQueue:dispatch_get_current_queue()];
-	if(![sock connectToHost:host onPort:port error:NULL]) {
-		[self release];
+	GCDAsyncSocket *socket = [[GCDAsyncSocket alloc] initWithDelegate:self delegateQueue:dispatch_get_current_queue()];
+	if(![socket connectToHost:host onPort:port error:NULL])
 		return nil;
-	}
-	return [self initWithGCDAsyncSocket:sock];
+	
+	return [self initWithGCDAsyncSocket:socket];
 }
 
 
 - (void)dealloc {
 	[self disconnectImmediately];
-	[socket release];
-	[connectHandler release];
-	[disconnectHandler release];
-	[readCallbacks release];
-	[writeCallbacks release];
-	[super dealloc];
 }
 
 
 - (void)disconnect {
-	[socket disconnectAfterReadingAndWriting];
+	[self.socket disconnectAfterReadingAndWriting];
 	
 	// Our owner may let go of us after disconnecting, so we want to survive until the socket is disconnected.
 	// GCDAsyncSocket will keep sending delegate messages until it's disconnected,
 	// and setting the delegate to nil doesn't work, since that's async, too.
-	[socket performBlock:^{[self self];}];
+	[self.socket performBlock:^{[self self];}];
 }
 
 
 - (void)disconnectImmediately {
 	[self disconnect];
-	[socket disconnect];
+	[self.socket disconnect];
 }
 
 
 - (void)writeData:(NSData*)data timeout:(NSTimeInterval)timeout callback:(void(^)())didWriteCallback {
-	long tag = tagCounter++;
+	long tag = self.tagCounter++;
 	if(didWriteCallback)
-		[writeCallbacks setObject:[[didWriteCallback copy] autorelease] forKey:[NSNumber numberWithLong:tag]];
+		[self.writeCallbacks setObject:[didWriteCallback copy] forKey:@(tag)];
 	
-	[socket writeData:data withTimeout:timeout tag:tag];
+	[self.socket writeData:data withTimeout:timeout tag:tag];
 }
 
 
 - (long)storeReadCallback:(void(^)(NSData *data))didReadCallback {
-	long tag = tagCounter++;
+	long tag = self.tagCounter++;
 	if(didReadCallback)
-		[readCallbacks setObject:[[didReadCallback copy] autorelease] forKey:[NSNumber numberWithLong:tag]];
+		[self.readCallbacks setObject:[didReadCallback copy] forKey:@(tag)];
 	return tag;
 }
 
 
 - (void)readDataToLength:(NSUInteger)length timeout:(NSTimeInterval)timeout callback:(void(^)(NSData *data))didReadCallback {
-	[socket readDataToLength:length withTimeout:timeout tag:[self storeReadCallback:didReadCallback]];
+	[self.socket readDataToLength:length withTimeout:timeout tag:[self storeReadCallback:didReadCallback]];
 }
 
 
 - (void)readDataToData:(NSData*)data timeout:(NSTimeInterval)timeout callback:(void(^)(NSData *data))didReadCallback {
-	[socket readDataToData:data withTimeout:timeout tag:[self storeReadCallback:didReadCallback]];
+	[self.socket readDataToData:data withTimeout:timeout tag:[self storeReadCallback:didReadCallback]];
 }
 
 
+- (void)readDataToData:(NSData*)data maxLength:(NSUInteger)maxLength timeout:(NSTimeInterval)timeout callback:(void(^)(NSData *data))didReadCallback {
+	[self.socket readDataToData:data withTimeout:timeout maxLength:maxLength tag:[self storeReadCallback:didReadCallback]];
+}
 
-@synthesize connectHandler, disconnectHandler;
 
 - (NSString*)host {
-	return [socket connectedHost];
+	return [self.socket connectedHost];
 }
 
 
@@ -101,7 +107,7 @@
 	NSMutableDictionary *dict = [NSMutableDictionary dictionary];
 	if(hostname) [dict setObject:hostname forKey:(id)kCFStreamSSLPeerName];
 	if(certs) [dict setObject:certs forKey:(id)kCFStreamSSLCertificates];
-	[socket startTLS:dict];
+	[self.socket startTLS:dict];
 }
 
 
@@ -110,31 +116,31 @@
 
 
 - (void)socket:(GCDAsyncSocket *)sock didConnectToHost:(NSString*)host port:(UInt16)port {
-	if(connectHandler)
-		connectHandler();
+	if(self.connectHandler)
+		self.connectHandler();
 }
 
 
 - (void)socketDidDisconnect:(GCDAsyncSocket *)sock withError:(NSError*)err {
-	if(disconnectHandler)
-		disconnectHandler(err);
+	if(self.disconnectHandler)
+		self.disconnectHandler(err);
 }
 
 
 - (void)socket:(GCDAsyncSocket *)sock didReadData:(NSData*)data withTag:(long)tag {
-	void(^callback)(NSData *data) = [readCallbacks objectForKey:[NSNumber numberWithLong:tag]];
+	void(^callback)(NSData *data) = [self.readCallbacks objectForKey:@(tag)];
 	if(callback) {
 		callback(data);
-		[readCallbacks removeObjectForKey:[NSNumber numberWithLong:tag]];
+		[self.readCallbacks removeObjectForKey:@(tag)];
 	}
 }
 
 
 - (void)socket:(GCDAsyncSocket *)sock didWriteDataWithTag:(long)tag {
-	void(^callback)() = [writeCallbacks objectForKey:[NSNumber numberWithLong:tag]];
+	void(^callback)() = [self.writeCallbacks objectForKey:@(tag)];
 	if(callback) {
 		callback();
-		[writeCallbacks removeObjectForKey:[NSNumber numberWithLong:tag]];
+		[self.writeCallbacks removeObjectForKey:@(tag)];
 	}
 }
 
@@ -142,6 +148,10 @@
 
 
 
+
+@interface TFSocketListener () <GCDAsyncSocketDelegate>
+@property(strong) GCDAsyncSocket *socket;
+@end
 
 
 @implementation TFSocketListener
@@ -151,11 +161,9 @@
 - (id)initWithPort:(uint16_t)port {
 	if(!(self = [super init])) return nil;
 	
-	socket = [[GCDAsyncSocket alloc] initWithDelegate:self delegateQueue:dispatch_get_current_queue()];
-	if(![socket acceptOnPort:port error:NULL]) {
-		[self release];
+	self.socket = [[GCDAsyncSocket alloc] initWithDelegate:self delegateQueue:dispatch_get_current_queue()];
+	if(![self.socket acceptOnPort:port error:NULL])
 		return nil;
-	}
 	
 	return self;
 }
@@ -163,22 +171,19 @@
 
 - (void)dealloc {
 	[self stop];
-	[acceptHandler release];
-	[super dealloc];
 }
 
 
 - (void)stop {
-	[socket disconnect];
-	[socket release];
-	socket = nil;
+	[self.socket disconnect];
+	self.socket = nil;
 }
 
 
 - (void)socket:(GCDAsyncSocket *)sock didAcceptNewSocket:(GCDAsyncSocket *)newSocket {
-	if(acceptHandler) {
-		TFSocket *tfSocket = [[[TFSocket alloc] initWithGCDAsyncSocket:newSocket] autorelease];
-		acceptHandler(tfSocket);
+	if(self.acceptHandler) {
+		TFSocket *tfSocket = [[TFSocket alloc] initWithGCDAsyncSocket:newSocket];
+		self.acceptHandler(tfSocket);
 	}
 }
 
